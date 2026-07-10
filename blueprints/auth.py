@@ -5,17 +5,19 @@ from models.user import User
 
 auth_bp = Blueprint("auth", __name__, url_prefix="/api/auth")
 
-# Accepted image types for profile pic (includes gif)
 ALLOWED_IMAGE_PREFIXES = ("data:image/png", "data:image/jpeg", "data:image/jpg", "data:image/gif", "data:image/webp")
-MAX_PROFILE_PIC_SIZE = 3 * 1024 * 1024  # ~3MB as base64 text, generous for a small demo
+MAX_PROFILE_PIC_SIZE = 3 * 1024 * 1024
 
 
 @auth_bp.route("/register", methods=["POST"])
 def register():
     data = request.get_json(silent=True) or {}
+    name = data.get("name", "").strip()
     email = data.get("email", "").strip().lower()
     password = data.get("password", "")
 
+    if not name:
+        return jsonify({"error": "Name is required"}), 400
     if not email or not password:
         return jsonify({"error": "Email and password required"}), 400
     if len(password) < 6:
@@ -24,7 +26,7 @@ def register():
     if User.query.filter_by(email=email).first():
         return jsonify({"error": "User already exists"}), 409
 
-    user = User(email=email)
+    user = User(name=name, email=email)
     user.set_password(password)
     db.session.add(user)
     db.session.commit()
@@ -66,7 +68,7 @@ def update_profile_pic():
         return jsonify({"error": "Not found"}), 404
 
     data = request.get_json(silent=True) or {}
-    image_data = data.get("image")  # base64 data URL, e.g. "data:image/gif;base64,...."
+    image_data = data.get("image")
 
     if not image_data:
         return jsonify({"error": "No image provided"}), 400
@@ -102,6 +104,6 @@ def delete_account():
     if not user:
         return jsonify({"error": "Not found"}), 404
 
-    db.session.delete(user)  # cascades to trades via relationship config
+    db.session.delete(user)
     db.session.commit()
     return jsonify({"status": "success", "message": "Account deleted"}), 200
