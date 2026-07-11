@@ -6,7 +6,7 @@ from models.user import User
 auth_bp = Blueprint("auth", __name__, url_prefix="/api/auth")
 
 ALLOWED_IMAGE_PREFIXES = ("data:image/png", "data:image/jpeg", "data:image/jpg", "data:image/gif", "data:image/webp")
-MAX_PROFILE_PIC_SIZE = 3 * 1024 * 1024
+MAX_PROFILE_PIC_SIZE = 11 * 1024 * 1024  # ~11MB base64, covers 8MB raw files after encoding overhead
 
 
 @auth_bp.route("/register", methods=["POST"])
@@ -75,7 +75,7 @@ def update_profile_pic():
     if not image_data.startswith(ALLOWED_IMAGE_PREFIXES):
         return jsonify({"error": "Unsupported image type. Use PNG, JPEG, GIF, or WEBP."}), 400
     if len(image_data) > MAX_PROFILE_PIC_SIZE:
-        return jsonify({"error": "Image too large. Keep it under ~2MB."}), 400
+        return jsonify({"error": "Image too large. Keep it under ~8MB."}), 400
 
     user.profile_pic = image_data
     db.session.commit()
