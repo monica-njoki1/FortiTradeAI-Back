@@ -54,6 +54,13 @@ def create_trade():
     # Step 1: fraud check gate
     risk_result = evaluate_trade(user, trade_request, request_meta)
 
+    # Remember this device going forward — a device only counts as "new"
+    # the first time it's ever used, not on every single trade
+    fp = request_meta["device_fingerprint"]
+    if fp and fp not in (user.known_devices or []):
+        user.known_devices = (user.known_devices or []) + [fp]
+        db.session.commit()
+
     if risk_result["decision"] == "blocked":
         return jsonify({"status": "blocked", "risk": risk_result}), 403
 
