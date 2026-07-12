@@ -13,6 +13,12 @@ RISK_WEIGHTS = {
 RISK_THRESHOLD_FLAG = 40
 RISK_THRESHOLD_BLOCK = 70
 
+# Lowered from 5 to 2 — with the original threshold, triggering a flagged
+# result reliably required 5+ trades within 10 minutes, which was slow and
+# confusing to reproduce for testing/demo purposes. 2 is still a real signal
+# of rapid activity, just far faster to demonstrate.
+RAPID_FIRE_TRADE_THRESHOLD = 2
+
 
 def score_trade(user, trade_request, request_meta):
     score = 0
@@ -23,7 +29,7 @@ def score_trade(user, trade_request, request_meta):
         Trade.created_at >= datetime.utcnow() - timedelta(minutes=10)
     ).all()
 
-    if len(recent_trades) >= 5:
+    if len(recent_trades) >= RAPID_FIRE_TRADE_THRESHOLD:
         score += RISK_WEIGHTS["rapid_fire"]
         triggered.append("rapid_fire")
 
