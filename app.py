@@ -42,6 +42,7 @@ def create_app():
             "GET",
             "POST",
             "PUT",
+            "PATCH",
             "DELETE",
             "OPTIONS"
         ]
@@ -52,7 +53,7 @@ def create_app():
     app.register_blueprint(trading_bp)
     app.register_blueprint(fraud_bp)
 
-    # Health check route
+    # Health check endpoint
     @app.route("/api/health", methods=["GET"])
     def health():
         return jsonify({
@@ -68,7 +69,7 @@ app = create_app()
 
 if __name__ == "__main__":
     app.run(
-        debug=True,
         host="0.0.0.0",
-        port=int(os.environ.get("PORT", 5000))
+        port=int(os.environ.get("PORT", 5000)),
+        debug=True
     )
