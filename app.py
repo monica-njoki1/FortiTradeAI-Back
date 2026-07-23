@@ -24,6 +24,10 @@ def create_app():
     app.register_blueprint(trading_bp)
     app.register_blueprint(fraud_bp)
 
+    @app.route("/", methods=["GET"])
+    def root():
+        return jsonify({"service": "FortiTrade AI", "status": "ok", "docs": "/api/health"}), 200
+
     @app.route("/api/health", methods=["GET"])
     def health():
         return jsonify({"status": "ok", "service": "FortiTrade AI"}), 200
