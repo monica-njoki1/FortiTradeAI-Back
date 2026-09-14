@@ -4,7 +4,7 @@ from flask_cors import CORS
 from flask_jwt_extended import JWTManager
 from flask_migrate import Migrate
 
-from config import Config
+from config import Config, validate_runtime_config
 from models import db
 from blueprints.auth import auth_bp
 from blueprints.trading import trading_bp
@@ -14,6 +14,7 @@ from blueprints.fraud import fraud_bp
 def create_app():
     app = Flask(__name__)
     app.config.from_object(Config)
+    validate_runtime_config(app)
 
     db.init_app(app)
     Migrate(app, db)
@@ -30,7 +31,12 @@ def create_app():
 
     @app.route("/api/health", methods=["GET"])
     def health():
-        return jsonify({"status": "ok", "service": "FortiTrade AI"}), 200
+        return jsonify({
+            "status": "ok",
+            "service": "FortiTrade AI",
+            "trading_environment": app.config["BINANCE_ENV"],
+            "live_trading_enabled": app.config["BINANCE_ENV"] == "live" and app.config["LIVE_TRADING_ENABLED"],
+        }), 200
 
     return app
 

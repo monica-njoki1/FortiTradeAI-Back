@@ -17,6 +17,7 @@ class Trade(db.Model):
     triggered_factors = db.Column(db.JSON, default=list)
 
     binance_order_id = db.Column(db.String(64), nullable=True)
+    binance_client_order_id = db.Column(db.String(64), nullable=True, unique=True)
     execution_status = db.Column(db.String(20), default="pending")  # pending/executed/failed/simulated
 
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
@@ -51,6 +52,7 @@ class Trade(db.Model):
             "risk_decision": self.risk_decision,
             "triggered_factors": self.triggered_factors,
             "binance_order_id": self.binance_order_id,
+            "binance_client_order_id": self.binance_client_order_id,
             "execution_status": self.execution_status,
             "created_at": self.created_at.isoformat(),
         }

@@ -13,7 +13,7 @@ Backend: `https://fortitradeai.onrender.com`
 1. A lightweight strategy engine reads live Binance price data and generates a buy/sell/hold signal (SMA crossover)
 2. Every trade request is scored against fraud risk factors (rapid-fire trading, volume spikes, new devices, location mismatches, rapid liquidation patterns)
 3. Flagged trades get a plain-language risk explanation from Gemma AI via Fireworks
-4. Only approved/flagged (non-blocked) trades are executed for real on Binance Testnet
+4. Only approved/flagged (non-blocked) trades are executed on Binance Spot Testnet by default
 5. Everything is logged with full audit trail (risk score, factors, execution status)
 
 ## Tech stack
@@ -143,3 +143,22 @@ The container runs `start.sh`, which applies migrations before starting gunicorn
 - Deployed on **Render** (Frankfurt region — Binance Testnet blocks requests from US-region servers with HTTP 451)
 - Migrations run automatically on every deploy via `start.sh`
 - SQLite is used for the hackathon deployment; swap `DATABASE_URL` to a PostgreSQL connection string for production use, since Render's filesystem is ephemeral
+
+## Real-money trading: operator-only pilot
+
+This repository is now safe-by-default: `BINANCE_ENV=testnet` is the default and **no setting silently switches to live money**. It is suitable for a single-operator pilot only, not a multi-customer exchange product. The server holds one Binance API credential, so allowing arbitrary app users to submit orders would pool control of that account.
+
+To enable a carefully limited Spot pilot, configure a PostgreSQL database and these production-only variables:
+
+```env
+BINANCE_ENV=live
+LIVE_TRADING_ENABLED=true
+OPERATOR_USER_EMAIL=the-binance-account-owner@example.com
+MAX_ORDER_NOTIONAL_USDT=25
+SECRET_KEY=<unique-long-random-value>
+JWT_SECRET_KEY=<different-unique-long-random-value>
+```
+
+The matching user must also send `"confirm_live_trade": true` with each order. Every order is checked against Binance's current symbol quantity and minimum-notional rules, capped by `MAX_ORDER_NOTIONAL_USDT`, and assigned a unique client order ID before it is submitted. If the exchange call times out, the order is marked `needs_reconciliation`; do not retry it until its client order ID is checked on Binance.
+
+Before launch, keep the API key withdrawal permission disabled, use Binance's trusted-IP restriction for the deploy's fixed egress IP, complete your jurisdiction/compliance review, publish risk disclosures and support contacts, add independent security review plus monitoring/alerting, and run a sustained Testnet pilot. For a customer-facing product, redesign custody and key management: users must connect their own exchange account through an approved OAuth/broker flow or a dedicated encrypted-secret/KMS system with consent and revocation—not share one app-held trading key.

@@ -1,5 +1,6 @@
 from datetime import datetime
-from flask import Blueprint, request, jsonify
+from uuid import uuid4
+from flask import Blueprint, current_app, request, jsonify
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from models import db
 from models.user import User
@@ -7,7 +8,7 @@ from models.trade import Trade
 from services.fraud_engine import evaluate_trade
 from services.fireworks_client import analyze_trade_risk
 from services.trading_strategy import generate_signal
-from services.binance_client import place_order, get_price
+from services.binance_client import BinanceError, place_order, get_price, validate_market_order
 
 trading_bp = Blueprint("trading", __name__, url_prefix="/api/trades")
 
@@ -37,12 +38,33 @@ def create_trade():
     if not required.issubset(trade_request):
         return jsonify({"error": f"Missing fields, need: {required}"}), 400
 
+    trade_request["symbol"] = str(trade_request["symbol"]).upper().strip()
+    trade_request["side"] = str(trade_request["side"]).upper().strip()
+    if trade_request["side"] not in {"BUY", "SELL"}:
+        return jsonify({"error": "side must be BUY or SELL"}), 400
+
+    is_live = current_app.config["BINANCE_ENV"] == "live"
+    if is_live:
+        # This backend deliberately supports one operator account only. Never let
+        # arbitrary application users trade a pooled exchange account.
+        if user.email.lower() != current_app.config["OPERATOR_USER_EMAIL"]:
+            return jsonify({"error": "Live execution is restricted to the configured operator account."}), 403
+        if trade_request.get("confirm_live_trade") is not True:
+            return jsonify({"error": "Set confirm_live_trade to true to submit a real-money order."}), 400
+
     # Always use the live Binance price rather than trusting a client-supplied price
     try:
         live_price = get_price(trade_request["symbol"])
-    except Exception as e:
-        return jsonify({"error": f"Could not reach Binance testnet: {str(e)}"}), 502
+    except BinanceError as e:
+        return jsonify({"error": str(e)}), 502
     trade_request["price"] = live_price
+    try:
+        normalized_quantity = validate_market_order(
+            trade_request["symbol"], trade_request["quantity"], live_price
+        )
+        trade_request["quantity"] = float(normalized_quantity)
+    except BinanceError as e:
+        return jsonify({"error": str(e)}), 400
 
     request_meta = {
         "ip": request.remote_addr,
@@ -62,34 +84,48 @@ def create_trade():
         db.session.commit()
 
     if risk_result["decision"] == "blocked":
-        return jsonify({"status": "blocked", "risk": risk_result}), 403
+        blocked_trade = Trade.create(
+            user, trade_request, risk_score=risk_result["score"],
+            decision=risk_result["decision"], factors=risk_result["triggered_factors"],
+            execution_status="blocked",
+        )
+        return jsonify({"status": "blocked", "trade": blocked_trade.to_dict(), "risk": risk_result}), 403
 
     explanation = None
     if risk_result["decision"] == "flagged":
         explanation = analyze_trade_risk(trade_request, risk_result)
 
-    # Step 2: execute on Binance testnet (only reached if not blocked)
-    binance_order_id = None
-    execution_status = "simulated"
+    # Persist a unique client order id *before* the network call. If the response
+    # times out, support can reconcile the exact order with Binance safely.
+    trade = Trade.create(
+        user, trade_request,
+        risk_score=risk_result["score"], decision=risk_result["decision"],
+        factors=risk_result["triggered_factors"], execution_status="pending",
+    )
+    trade.binance_client_order_id = f"fta-{trade.id}-{uuid4().hex[:16]}"
+    db.session.commit()
+
+    # Step 2: execute only after all controls have passed.
     try:
         order = place_order(
             symbol=trade_request["symbol"],
             side=trade_request["side"],
-            quantity=trade_request["quantity"],
+            quantity=normalized_quantity,
+            client_order_id=trade.binance_client_order_id,
         )
-        binance_order_id = str(order.get("orderId"))
-        execution_status = "executed"
-    except Exception as e:
-        execution_status = "failed"
-
-    trade = Trade.create(
-        user, trade_request,
-        risk_score=risk_result["score"],
-        decision=risk_result["decision"],
-        factors=risk_result["triggered_factors"],
-        binance_order_id=binance_order_id,
-        execution_status=execution_status,
-    )
+        trade.binance_order_id = str(order.get("orderId"))
+        trade.execution_status = str(order.get("status", "submitted")).lower()
+    except BinanceError as e:
+        # Do not claim no order exists: a timed-out request can still have reached
+        # the exchange. The client order id is the reconciliation key.
+        trade.execution_status = "needs_reconciliation"
+        db.session.commit()
+        return jsonify({
+            "status": "needs_reconciliation", "trade": trade.to_dict(),
+            "error": str(e),
+            "message": "Do not retry this order until its client order ID is checked on Binance.",
+        }), 502
+    db.session.commit()
 
     return jsonify({
         "status": "success",
