@@ -55,12 +55,12 @@ def _request(method: str, path: str, *, params=None, signed=False):
     return response.json()
 
 
-def _decimal(value, field="value") -> Decimal:
+def _decimal(value, field="value", allow_zero=False) -> Decimal:
     try:
         result = Decimal(str(value))
     except (InvalidOperation, ValueError) as exc:
         raise BinanceError(f"{field} must be a positive decimal number.") from exc
-    if not result.is_finite() or result <= 0:
+    if not result.is_finite() or result < 0 or (not allow_zero and result == 0):
         raise BinanceError(f"{field} must be a positive decimal number.")
     return result
 
@@ -86,12 +86,18 @@ def validate_market_order(symbol: str, quantity, price) -> str:
     filters = {item["filterType"]: item for item in symbols[0].get("filters", [])}
     lot = filters.get("MARKET_LOT_SIZE") or filters.get("LOT_SIZE")
     if lot:
-        minimum, maximum, step = (_decimal(lot["minQty"]), _decimal(lot["maxQty"]), _decimal(lot["stepSize"]))
-        if not minimum <= quantity <= maximum or quantity % step != 0:
-            raise BinanceError(f"quantity must be between {minimum} and {maximum} in increments of {step}.")
+        minimum, maximum, step = (
+            _decimal(lot["minQty"], allow_zero=True),
+            _decimal(lot["maxQty"], allow_zero=True),
+            _decimal(lot["stepSize"], allow_zero=True),
+        )
+        if (minimum > 0 and quantity < minimum) or (maximum > 0 and quantity > maximum):
+            raise BinanceError(f"quantity must be between {minimum} and {maximum}.")
+        if step > 0 and quantity % step != 0:
+            raise BinanceError(f"quantity must be in increments of {step}.")
     notional = quantity * price
     notional_filter = filters.get("NOTIONAL") or filters.get("MIN_NOTIONAL")
-    if notional_filter and notional < _decimal(notional_filter["minNotional"]):
+    if notional_filter and notional < _decimal(notional_filter["minNotional"], allow_zero=True):
         raise BinanceError("Order value is below Binance's minimum notional.")
     cap = Decimal(str(current_app.config["MAX_ORDER_NOTIONAL_USDT"]))
     if notional > cap:
